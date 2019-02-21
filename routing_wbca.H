@@ -6,6 +6,7 @@
 
 #define WBCA_BROADCAST_JITTER          (20 * MILLI_SECOND)
 #define WBCA_HELLO_INTERVAL	 (0.5 * SECOND)
+#define WBCA_THREE_INTERVAL	 (0.5 * SECOND)
 
 #define WBCA_MNLIST_SIZE  200
 #define WBCA_MaxNumOfMem  20
@@ -103,7 +104,8 @@ typedef struct struct_network_wbca_str
 	RandomSeed  wbcaJitterSeed;
 	Address defaultInterfaceAddr;
 	int defaultInterface;
-
+    NodeAddress temporaryip;
+	clocktype temporarytime;
 	clocktype lastBroadcastSent;
 
     //------------------lkn

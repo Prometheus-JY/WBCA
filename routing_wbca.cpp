@@ -1487,14 +1487,19 @@ WbcaHandleProtocolPacket(
 			{
 				MESSAGE_Free(node, msg);  
 				break;
-			}						
+			}
+			
 			else if(pkt->destAddr != wbca->iface->address.interfaceAddr.ipv4) //不是给我的消息
 			{
 				MESSAGE_Free(node, msg);  
 				break;
 			}
 			else
-			{
+			{   if(wbca->Ms==0||(wbca->Ms=1&&getSimTime(node)-wbca->temporarytime>4*WBCA_THREE_INTERVAL&&wbca->temporaryip!=srcAddr.interfaceAddr.ipv4))
+			{   wbca->temporarytime=getSimTime(node);
+                 wbca->Ms=1;
+			    wbca->temporaryip=srcAddr.interfaceAddr.ipv4;
+				
 				wbca->unacceptedCID = pkt->info;
 				if(DEBUG_MODE&0x02){
 					printf(" node: %d send WBCA_REQUEST to ip %x \n",node->nodeId,srcAddr.interfaceAddr.ipv4);
@@ -1502,6 +1507,8 @@ WbcaHandleProtocolPacket(
 				
 				WbcaSendMes(node, wbca, WBCA_REQUEST, 0, srcAddr.interfaceAddr.ipv4, pkt->info);
 			}
+				}
+
 			
 			MESSAGE_Free(node, msg);
 			break;
@@ -1576,6 +1583,8 @@ WbcaHandleProtocolPacket(
 			WbcaData* wbca = (WbcaData *) NetworkIpGetRoutingProtocol(node,
                                         ROUTING_PROTOCOL_WBCA,
                                         NETWORK_IPV4);
+			wbca->Ms=0;
+			
 			if(wbca->state == LEADER || wbca->state == MEMBER)
 			{
 				MESSAGE_Free(node, msg);  
