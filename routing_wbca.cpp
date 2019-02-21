@@ -103,6 +103,7 @@ WbcaInit(
 	wbca->numOfMN = 0;
 	wbca->numOfRoute = 0;
 	wbca->Mn = 1;//æ–‡æ¡£é‡Œé¢çš„Ms
+	wbca->Ms=0;
 	wbca->memIdSeed = 1;
 	wbca->checkMemNum = 0;
     wbca->x = node->mobilityData->current->position.common.c1;
@@ -1495,7 +1496,8 @@ WbcaHandleProtocolPacket(
 				break;
 			}
 			else
-			{   if(wbca->Ms==0||(wbca->Ms=1&&getSimTime(node)-wbca->temporarytime>4*WBCA_THREE_INTERVAL&&wbca->temporaryip!=srcAddr.interfaceAddr.ipv4))
+			{  if(wbca->state!=LEADER&&wbca->state!=MEMBER){
+			if(wbca->Ms==0||(getSimTime(node)-wbca->temporarytime>6*WBCA_THREE_INTERVAL&&wbca->temporaryip!=srcAddr.interfaceAddr.ipv4))
 			{   wbca->temporarytime=getSimTime(node);
                  wbca->Ms=1;
 			    wbca->temporaryip=srcAddr.interfaceAddr.ipv4;
@@ -1507,7 +1509,7 @@ WbcaHandleProtocolPacket(
 				
 				WbcaSendMes(node, wbca, WBCA_REQUEST, 0, srcAddr.interfaceAddr.ipv4, pkt->info);
 			}
-				}
+				}}
 
 			
 			MESSAGE_Free(node, msg);
@@ -1583,7 +1585,7 @@ WbcaHandleProtocolPacket(
 			WbcaData* wbca = (WbcaData *) NetworkIpGetRoutingProtocol(node,
                                         ROUTING_PROTOCOL_WBCA,
                                         NETWORK_IPV4);
-			wbca->Ms=0;
+			
 			
 			if(wbca->state == LEADER || wbca->state == MEMBER)
 			{
@@ -1618,7 +1620,7 @@ WbcaHandleProtocolPacket(
 								currtime);
 		            
 				wbca->CID = wbca->unacceptedCID;
-				wbca->Mn = 1;
+				
 			}
 
 			MESSAGE_Free(node, msg);
