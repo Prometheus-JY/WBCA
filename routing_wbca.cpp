@@ -15,7 +15,7 @@
     % WBCA_BROADCAST_JITTER)
 
 
-const int DEBUG_MODE = 0x0E;
+const int DEBUG_MODE = 0x06;
 
 static
 void WbcaInitializeConfigurableParameters(
@@ -96,6 +96,7 @@ WbcaInit(
 	memset(wbca->iface,0,sizeof(WbcaInterfaceInfo) * node->numberInterfaces);
 	
 	wbca->state = 1;
+	node->is_leader = 0;
 	insertTraceState(node,wbca->state);
 
 	wbca->conn = 0;//½ÚµãµÄÁ¬½Ó¶È¼´½ÚµãÁÚ¾Ó½Úµã¸öÊý
@@ -114,6 +115,7 @@ WbcaInit(
 	wbca->seqNumber=0;
 	wbca->CR=0;
 	wbca->statsPrinted=FALSE;
+	wbca->lost_leader_count = 0;
 
 
 	for(int i=0; i<WBCA_MNLIST_SIZE; i++)
@@ -317,22 +319,21 @@ void WbcaBroadcastHelloMessage(Node* node, WbcaData* wbca, Address* destAddr)
 				 NETWORK_LAYER,
 				 protocolType,
 				 MSG_MAC_FromNetwork);
-  
+  	
+  	//先有消息,然后再根据消息分配packet(MESSAGE_PacketAlloc)
 	MESSAGE_PacketAlloc(
 		node,
 		newMsg,
 		pktSize,
 		TRACE_WBCA);
 
+	//pktPtr是newMsg携带的消息包
 	pktPtr = (char *) MESSAGE_ReturnPacket(newMsg);
 
 	memset(pktPtr, 0, pktSize);
 
 
-	// Section 8.4 of draft-ietf-manet-aodv-08.txt
-	// Allocate the message and then broadcast to all interfaces
-	// Hello Mesage 
-	helloPkt = (WbcaHelloPacket *) pktPtr;
+	helloPkt = (WbcaHelloPacket *) pktPtr; //helloPkt就是pktPtr
 	helloPkt->CID = wbca->CID;
 	helloPkt->conn = wbca->conn;
 	helloPkt->Wei = wbca->wei;
@@ -344,6 +345,16 @@ void WbcaBroadcastHelloMessage(Node* node, WbcaData* wbca, Address* destAddr)
     helloPkt->x=wbca->x;
     helloPkt->y=wbca->y;
     helloPkt->z=wbca->z;
+
+
+    //如果是簇头 hello要包含自己的邻居表
+    if(wbca->state==LEADER ||wbca->state==LONELY_LEADER){
+    	helloPkt->my_neighbor_number = wbca->numOfMN;
+    	for(i = 0; i < wbca->numOfMN; i++){
+    		helloPkt->my_neighbors[i] = wbca->mnlist[i]->IP;
+    	}
+    }
+
 	for (i = 0; i < node->numberInterfaces; i++)
 	{
 		/*if (WbcaIsEligibleInterface(node, destAddr, &wbca->iface[i])
@@ -355,17 +366,11 @@ void WbcaBroadcastHelloMessage(Node* node, WbcaData* wbca, Address* destAddr)
 		clocktype delay =
 			(clocktype) WBCA_PC_ERAND(wbca->wbcaJitterSeed);
 
-		helloPkt = (WbcaHelloPacket *) MESSAGE_ReturnPacket(newMsg);
+		// helloPkt = (WbcaHelloPacket *) MESSAGE_ReturnPacket(newMsg);
 		helloPkt->destination.address =
 			wbca->iface[i].address.interfaceAddr.ipv4;
 			
 		SetIPv4AddressInfo(&broadcastAddress,ANY_DEST);
-/*
-		if (AODV_DEBUG_AODV_TRACE)
-		{
-			WBCAPrintTrace(node, newMsg, 'S',IPV6);
-		}
-*/
 
 		WbcaSendPacket(
 			node,
@@ -683,6 +688,7 @@ WbcaCheckMemID(WbcaData* wbca, UInt16 ID)
 	return TRUE;
 }
 
+//簇头节点收到REQUEST之后
 void
 WbcaInsertMemMNList(WbcaData* wbca, Node* node, NodeAddress ip, Int16 CID,double wei)
 {
@@ -694,6 +700,7 @@ WbcaInsertMemMNList(WbcaData* wbca, Node* node, NodeAddress ip, Int16 CID,double
     Int8 getMemId = CID % 256;
 	Int8 getHeaderId = CID / 256;
 
+	//得到对面是什么情况(未分簇 簇头 成员)
 	if(getMemId == 0 && getHeaderId == 0)
 	{
 			isUn = 1;
@@ -766,6 +773,7 @@ WbcaInsertMemMNList(WbcaData* wbca, Node* node, NodeAddress ip, Int16 CID,double
 	}
 }
 
+//每次发送hello前 都会调用这个函数
 void
 WbcaCheckMNList(WbcaData * wbca, Node* node)
 {
@@ -782,6 +790,7 @@ WbcaCheckMNList(WbcaData * wbca, Node* node)
 					printf("node %d cid(%x) MEMBER->PRE_MEMBER lost leader\n",node->nodeId,wbca->CID);
 				}
 				wbca->state = PRE_MEMBER;
+				node->is_leader = 0;
 				insertTraceState(node,wbca->state);
 				wbca->CID = 0;
 				wbca->cnt = 0;
@@ -792,8 +801,8 @@ WbcaCheckMNList(WbcaData * wbca, Node* node)
 							currtime);
 			}
 
-			//å½“è·¯ç”±è¡¨å»ºç«‹åŽå®Œæˆåºåˆ—å·åŠ 1
-			if((wbca->numOfRoute>0 )&& (wbca->mnlist[i]->okHeader))//自己是簇头,丢失了自己邻居表中的另一位簇头
+			//自己是簇头,丢失了自己邻居表中的另一位簇头
+			if((wbca->numOfRoute>0 )&& (wbca->mnlist[i]->okHeader))
 	        {
 	          for(Int8 k=0;k<wbca->numOfRoute;k++)
 		      {
@@ -808,6 +817,7 @@ WbcaCheckMNList(WbcaData * wbca, Node* node)
 		         }
               }		
             }
+            printf("node %d cid(%x) lost a neighbor(IP:%x CID:%x)\n",node->nodeId,wbca->CID,wbca->mnlist[i]->IP,wbca->mnlist[i]->CID);
 			DeleteFromMNList(wbca, i);
 		}
 	}
@@ -828,6 +838,7 @@ WbcaCheckMNList(WbcaData * wbca, Node* node)
 				printf("node %d cid(%x) MEMBER->COMPARING ?1? in WbcaCheckMNList\n",node->nodeId,wbca->CID);
 			}
 			wbca->state = COMPARING;
+			node->is_leader = 0;
 			wbca->CID = 0;
 			clocktype currtime=getSimTime(node);
             GUI_SetNodeIcon(node->nodeId,
@@ -853,6 +864,7 @@ WbcaCheckMNList(WbcaData * wbca, Node* node)
 				printf("node %d cid(%x) LEADER->LONELY_LEADER ?2? in WbcaCheckMNList\n",node->nodeId,wbca->CID);
 			}
 			wbca->state = LONELY_LEADER;
+			node->is_leader = 1;
 			clocktype currtime=getSimTime(node);
             GUI_SetNodeIcon(node->nodeId,
 					"gui/icons/tank.png",
@@ -861,12 +873,13 @@ WbcaCheckMNList(WbcaData * wbca, Node* node)
 	}
 }
 
+//更新邻居表使用新的CID替换老的CID 新增全新条目
 void
 WbcaUpdateMNList(WbcaData* wbca, Node* node, NodeAddress ip, Int16 CID, Int8 conn,double m, double wei)
 {
 	bool isInMnlist = 0;
 
-	//循环判断 更新邻居表	
+	//循环判断 更新邻居表	使用新的CID替换老的CID
 	for(Int8 i=0; i<wbca->numOfMN; i++)
 	{	
 		if(wbca->mnlist[i]->IP == ip)
@@ -1074,18 +1087,21 @@ void WbcaRTUPMessage(Node* node,WbcaData* wbca,Address* destAddr)
 	}
 
 
-	//暂时注释,本来是用来调试的代码
-	if(sizeRoute <=0){
-		printf("ERROR: when boardcast RTUP message node %d routecount <= 0 \n",node->nodeId);
-	}else{
-		printf("--DISPLAY Route Table of node %d before boardcast RTUP----\n",node->nodeId);
-	    for(int j = 0;j<sizeRoute;j++){
-	    	printf("\t NO\tdestIP\tdestCID\tnhopIP\tnhopCID\tdistance\tseqNum\n");
-	 		printf("\t %d:\t%x\t%x\t%x\t%x\t%d\t%d\n",j+1,wbca->routeTable[j]->destnation,wbca->routeTable[j]->destCID,wbca->routeTable[j]->NextHop,wbca->routeTable[j]->nextCID,wbca->routeTable[j]->distance,wbca->routeTable[j]->seqNum);
-	 	}
-	 	printf("------------------END------------------\n");
-		//WbcaOutputMNList(wbca);
+
+	if(DEBUG_MODE&0x08){
+		if(sizeRoute <=0){
+			printf("ERROR: when boardcast RTUP message node %d routecount <= 0 \n",node->nodeId);
+		}else{
+			printf("--DISPLAY Route Table of node %d before boardcast RTUP----\n",node->nodeId);
+		    for(int j = 0;j<sizeRoute;j++){
+		    	printf("\t NO\tdestIP\tdestCID\tnhopIP\tnhopCID\tdistance\tseqNum\n");
+		 		printf("\t %d:\t%x\t%x\t%x\t%x\t%d\t%d\n",j+1,wbca->routeTable[j]->destnation,wbca->routeTable[j]->destCID,wbca->routeTable[j]->NextHop,wbca->routeTable[j]->nextCID,wbca->routeTable[j]->distance,wbca->routeTable[j]->seqNum);
+		 	}
+		 	printf("------------------END------------------\n");
+			//WbcaOutputMNList(wbca);
+		}
 	}
+	
 
 	
 	int headerSize = sizeof(WbcaRTUPHeader);
@@ -1329,8 +1345,7 @@ WbcaHandleProtocolPacket(
 			// get info
 			Int16 CID = pkt->CID;
 			if(DEBUG_MODE&0x01){
-				printf("LOG:0x%x RECEIVE WBCA HELLO PACKET FROM",wbca->iface->address.interfaceAddr);
-				printf(" 0x%x\n",srcAddr.interfaceAddr.ipv4);
+				printf("node: %d receive Wbca_Hello from ip %x\n",node->nodeId,srcAddr.interfaceAddr.ipv4);
 			}
 			
 			Int8 conn = pkt->conn;
@@ -1380,6 +1395,7 @@ WbcaHandleProtocolPacket(
 						printf("node %d cid(%x) COMPARING->PRE_MEMBER weight too large\n",node->nodeId,wbca->CID);
 					}
 					wbca->state = PRE_MEMBER;
+					node->is_leader = 0;
 					insertTraceState(node,wbca->state);
 					wbca->CID = 0;
 					wbca->cnt = 0;
@@ -1390,8 +1406,8 @@ WbcaHandleProtocolPacket(
 			//自己是未成簇状态(包含3种),或者是孤立簇头的时候,设置自己的簇内成员数量为0(多余),并向发来hello的簇头发送join包
 
 			else if(isHeader)
-			{	//自己是未成簇状态的状态
-				if(wbca->state != 4 && wbca->state != 5 && wbca->state != 6) 
+			{	//自己是未成簇状态的状态 或者是孤立簇头 则发送join
+				if(wbca->state != LEADER && wbca->state != MEMBER) 
 				{
 					if(Mn < WBCA_MaxNumOfMem)
 					{
@@ -1403,17 +1419,24 @@ WbcaHandleProtocolPacket(
 						WbcaSendMes(node, wbca, WBCA_JOIN, CID, srcAddr.interfaceAddr.ipv4, 0);
 					}
 				}
-				//自己是孤立簇头的状态
-				else if(wbca->state == 5 && Mn < WBCA_MaxNumOfMem)  
-				{
-					//send join packet
-					wbca->Mn = 0; //把自己的簇内成员数量设为0(好像没必要)
-					if(DEBUG_MODE&0x02){
-						printf(" node: %d(state 5) send WBCA_JOIN to ip %x\n",node->nodeId,srcAddr.interfaceAddr.ipv4);
+				
+				//自己是成员状态 要看看自己是不是已经远离簇头 而因簇头功率变大传来的hello让自己错误地认为自己还在簇中
+				//详细的说,加这里是为了避免 某节点已经远离簇头本该不在这个簇内,但却因为收到的来自簇头的hello而错误地认为自己还在
+				if(wbca->state == MEMBER && (pkt->CID/256) == (wbca->CID/256)){
+					bool flag = 0;//自己簇头的邻居表中是否还有自己 0--没有
+					for(int u =0; u<pkt->my_neighbor_number;u++){
+						if(pkt->my_neighbors[u] == wbca->iface->address.interfaceAddr.ipv4){
+							flag = 1;
+						}
 					}
-					
-					WbcaSendMes(node, wbca, WBCA_JOIN, CID, srcAddr.interfaceAddr.ipv4, 0);
+					//自己簇头的邻居表中没有自己,说明自己已经远离粗头
+					if(flag == 0){
+						wbca->lost_leader_count++;
+					}else if(flag == 1){
+						wbca->lost_leader_count = 0;
+					}
 				}
+				
 			}
 			//--------------------来自成员节点的hello消息------------------------
 			else if(isMem)
@@ -1496,20 +1519,23 @@ WbcaHandleProtocolPacket(
 				break;
 			}
 			else
-			{  if(wbca->state!=LEADER&&wbca->state!=MEMBER){
-			if(wbca->Ms==0||(getSimTime(node)-wbca->temporarytime>6*WBCA_THREE_INTERVAL&&wbca->temporaryip!=srcAddr.interfaceAddr.ipv4))
-			{   wbca->temporarytime=getSimTime(node);
-                 wbca->Ms=1;
-			    wbca->temporaryip=srcAddr.interfaceAddr.ipv4;
-				
-				wbca->unacceptedCID = pkt->info;
-				if(DEBUG_MODE&0x02){
-					printf(" node: %d send WBCA_REQUEST to ip %x \n",node->nodeId,srcAddr.interfaceAddr.ipv4);
+			{  
+				if(wbca->state!=LEADER&&wbca->state!=MEMBER){ //包含了未成簇和孤立簇头两种情况
+					//如果三次握手标志位为0  或者  自从收到offer已经超过6T没有成为成员
+					if(wbca->Ms==0||getSimTime(node)-wbca->temporarytime>6*WBCA_THREE_INTERVAL)
+						{   wbca->temporarytime=getSimTime(node);
+			                wbca->Ms=1;
+						    wbca->temporaryip=srcAddr.interfaceAddr.ipv4;
+							
+							wbca->unacceptedCID = pkt->info;
+							if(DEBUG_MODE&0x02){
+								printf(" node: %d send WBCA_REQUEST to ip %x \n",node->nodeId,srcAddr.interfaceAddr.ipv4);
+							}
+							
+							WbcaSendMes(node, wbca, WBCA_REQUEST, 0, srcAddr.interfaceAddr.ipv4, pkt->info);
+						}
 				}
-				
-				WbcaSendMes(node, wbca, WBCA_REQUEST, 0, srcAddr.interfaceAddr.ipv4, pkt->info);
 			}
-				}}
 
 			
 			MESSAGE_Free(node, msg);
@@ -1548,7 +1574,7 @@ WbcaHandleProtocolPacket(
 					}
 				}
 		        wbca->state = LEADER;
-				node->is_leader = 1;
+				node->is_leader = 2;
 				insertTraceState(node,wbca->state);
 				clocktype currtime=getSimTime(node);
 				
@@ -1599,12 +1625,22 @@ WbcaHandleProtocolPacket(
 			}
 			else if(wbca->state != LEADER && wbca->state != MEMBER) //既不是簇头也不是成员
 			{
+	
+				if(wbca->temporaryip!=srcAddr.interfaceAddr.ipv4){
+					printf("node %d temporaryip %x but receive ACK from %x\n",node->nodeId,wbca->temporaryip,srcAddr.interfaceAddr.ipv4);
+					MESSAGE_Free(node, msg);
+					break;
+				}
 
 				if(DEBUG_MODE&0x04){
 					printf("node %d cid(%x -> %x) LPCC(%d)->MEMBER join a leader(ip%x)\n",node->nodeId,wbca->CID,wbca->unacceptedCID,wbca->state,srcAddr.interfaceAddr.ipv4);
 				}
-				wbca->state = MEMBER;clocktype currtime=getSimTime(node);
+				wbca->state = MEMBER;
+				node->is_leader = 0;
+				clocktype currtime=getSimTime(node);
 				insertTraceState(node,wbca->state);
+				wbca->Ms=0; //三次握手结束
+				
 					
 				char path_2d[35];
 				char path_3d[35];
@@ -1620,6 +1656,7 @@ WbcaHandleProtocolPacket(
 								currtime);
 		            
 				wbca->CID = wbca->unacceptedCID;
+				wbca->Mn = 1;
 				
 			}
 
@@ -1634,13 +1671,16 @@ WbcaHandleProtocolPacket(
 			WbcaRTUP *RTUP = (WbcaRTUP *)(pktPtr+sizeof(WbcaRTUPHeader));
 			int numroute = header->size;
 			if(wbca->state == 4||wbca->state ==5){
-				printf("--leader node %d receive the RTUP message from %x--\n",node->nodeId,srcAddr.interfaceAddr.ipv4);
-				printf("---------DISPLAY received RTUP message ---------\n");
- 	            for(int i =0;i<numroute;i++){
- 	            	printf("\t NO\tdestIP\tdestCID\tdistance\tseqNum\n");
- 	            	printf("\t %d\t%x\t%x\t%d\t%d\n",i+1,RTUP[i].destIP,RTUP[i].destCID,RTUP[i].distance,RTUP[i].seqNum);	
- 	            }
-			 	printf("-----------------------END----------------------\n");
+				if(DEBUG_MODE&0x08){
+					printf("--leader node %d receive the RTUP message from %x--\n",node->nodeId,srcAddr.interfaceAddr.ipv4);
+					printf("---------DISPLAY received RTUP message ---------\n");
+	 	            for(int i =0;i<numroute;i++){
+	 	            	printf("\t NO\tdestIP\tdestCID\tdistance\tseqNum\n");
+	 	            	printf("\t %d\t%x\t%x\t%d\t%d\n",i+1,RTUP[i].destIP,RTUP[i].destCID,RTUP[i].distance,RTUP[i].seqNum);	
+	 	            }
+				 	printf("-----------------------END----------------------\n");
+				}
+				
 				NodeAddress ssAddress = RTUP[0].destIP;
 				Int16 ssCID = RTUP[0].destCID;
 	            for(int i =0;i<numroute;i++){
@@ -1708,6 +1748,7 @@ WbcaHandleProtocolEvent(
 							currtime);
 				}else{ //在统计状态发现了邻居的存在,状态转为比较状态
 					wbca->state = COMPARING;
+					node->is_leader = 0;
 					insertTraceState(node,wbca->state);
 					wbca->CID = 0;
 					if(DEBUG_MODE&0x04){
@@ -1797,6 +1838,7 @@ WbcaHandleProtocolEvent(
 					printf("node %d cid(%x) LONELY_LEADER->LEADER join a mem\n",node->nodeId,wbca->CID);
 				}
 				wbca->state = LEADER;insertTraceState(node,wbca->state);
+				node->is_leader = 2;
 				wbca->checkMemNum = 0;
 				clocktype currtime=getSimTime(node);
 
@@ -1814,10 +1856,27 @@ WbcaHandleProtocolEvent(
 				
 			}
 
+			//有些成员连续三次收到自己簇头的hello包里面自己簇头的邻居表里均没有自己
+			if (wbca->state == MEMBER && wbca->lost_leader_count >= 3)
+			{
+				if(DEBUG_MODE&0x04){
+					printf("node %d cid(%x) MEMBER->PRE_MEMBER lost leader\n",node->nodeId,wbca->CID);
+				}
 
+				wbca->state = PRE_MEMBER;
+				node->is_leader = 0;
+				insertTraceState(node,wbca->state);
+				wbca->CID = 0;
+				wbca->cnt = 0;
+				clocktype currtime=getSimTime(node);
+					//---
+		            GUI_SetNodeIcon(node->nodeId,
+							"gui/icons/default.png",
+							currtime);
+			}
 
 			if(DEBUG_MODE&0x01){
-				printf("\n\n node: %d boardcasting Hello ",node->nodeId);
+				printf("node: %d boardcasting Hello\n",node->nodeId);
 			}
 			
 			WbcaBroadcastHelloMessage(node, wbca, destAddr);
@@ -1854,6 +1913,7 @@ WbcaHandleProtocolEvent(
 						printf("node %d cid(%x->0) LEADER->COMPARING numOfMem < 10&&wbca->numOfMN>10\n",node->nodeId,wbca->CID);
 					}
 					wbca->state = COMPARING;insertTraceState(node,wbca->state);
+					node->is_leader = 0;
 					clocktype currtime=getSimTime(node);
 					//--
 		            GUI_SetNodeIcon(node->nodeId,

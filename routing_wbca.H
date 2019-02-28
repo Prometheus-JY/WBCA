@@ -82,7 +82,7 @@ typedef struct struct_network_wbca_str
     Int8 Ms;     //标志位。0：节点不处于三次握手过程，1：节点处于三次握手过程
 	Int8 cnt;    //计数器
 	Int8 Mn;     //簇成员节点个数，未分簇节点和簇成员节点发送的Hello中Mn为0
-    WbcaMNList* mnlist[WBCA_MNLIST_SIZE];
+    WbcaMNList* mnlist[WBCA_MNLIST_SIZE]; //邻居表
 
     WbcaRouteTable* routeTable[WBCA_ROUTE_HASH_TABLE_SIZE]; //路由表
     Int16 numOfRoute;//路由表内成员个数
@@ -95,6 +95,8 @@ typedef struct struct_network_wbca_str
 	double M;
 	double m;
     double x,y,z;
+	//作为成员 3次收到来自簇头的hello 连续3次簇头的邻居表中没有自己时,自己变为Pre_member 
+    unsigned short lost_leader_count; 
     MobilityData* mobilityData;
 	int change;
 
@@ -112,6 +114,9 @@ typedef struct struct_network_wbca_str
     BOOL statsCollected;
     BOOL statsPrinted;
 
+
+
+
 }WbcaData;
 
 typedef struct Wbca_Hello_Packet
@@ -128,6 +133,10 @@ typedef struct Wbca_Hello_Packet
 	double x,y,z;
 	// destination address and sequence
     WbcaAddrSeqInfo destination;
+
+    //簇头节点广播hello的时候,要携带自己的邻居表都有哪些节点
+    NodeAddress my_neighbors[WBCA_MNLIST_SIZE];
+    Int8 my_neighbor_number;
 
     // source address and sequence
     WbcaAddrSeqInfo source;
@@ -163,11 +172,11 @@ typedef struct Wbca_RTUP
 //RTUP消息的头部
 typedef struct Wbca_RTUP_Packet
 {
-UInt8 mesType;
-WbcaAddrSeqInfo destination;
-WbcaAddrSeqInfo source;
-NodeAddress sourceAddr;
-int size;
+    UInt8 mesType;
+    WbcaAddrSeqInfo destination;
+    WbcaAddrSeqInfo source;
+    NodeAddress sourceAddr;
+    int size;
 }WbcaRTUPHeader;
 
 //路由功能
