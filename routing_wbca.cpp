@@ -1381,6 +1381,16 @@ WbcaHandleProtocolPacket(
 				isMem = 1;
 			}
 
+
+           //标志位为1的孤立簇头或者未分簇节点不再响应来自簇头的hello
+           if(isHeader&&wbca->Ms&&(wbca->state!=LEADER&&wbca->state!=MEMBER))
+           	{
+               break;
+             
+		   }
+
+
+			
 			//--------------------来自未成簇节点的hello消息------------------------
 			//自己是比较状态并且对面不是准簇成员状态时 比较wei,自己比较大的话,转换状态为准簇成员状态
 
@@ -1416,7 +1426,19 @@ WbcaHandleProtocolPacket(
 						if(DEBUG_MODE&0x02){
 							printf(" node: %d(state %d) send WBCA_JOIN to ip %x \n",node->nodeId,wbca->state,srcAddr.interfaceAddr.ipv4);
 						}
+
+                    bool flag = 0;//自己簇头的邻居表中是否还有自己 0--没有
+					for(int u =0; u<pkt->my_neighbor_number;u++){
+						if(pkt->my_neighbors[u] == wbca->iface->address.interfaceAddr.ipv4){
+							flag = 1;
+						}
+					}
+					//自己簇头的邻居表中没有自己,说明自己已经远离粗头
+					 if(flag == 1){
 						WbcaSendMes(node, wbca, WBCA_JOIN, CID, srcAddr.interfaceAddr.ipv4, 0);
+					}
+						
+						
 					}
 				}
 				
@@ -1458,7 +1480,40 @@ WbcaHandleProtocolPacket(
 			WbcaData* wbca = (WbcaData *) NetworkIpGetRoutingProtocol(node,
                                         ROUTING_PROTOCOL_WBCA,
                                         NETWORK_IPV4);
+            Int16 CID = srcAddr.interfaceAddr.ipv4%65536;
+            bool isUn=0;
+			bool isHeader=0;
+			bool isMem=0;
+            Int8 getMemId = CID % 256;
+			Int8 getHeaderId = CID / 256;
 
+			//printf("\n0x%x 0x%x\n",getHeaderId,getMemId);
+
+			//where does the Hello packet come from
+			if(getMemId == 0 && getHeaderId == 0)
+			{
+				isUn = 1;
+			}
+			else if(getMemId == 0 && getHeaderId != 0)
+			{
+				isHeader = 1;
+			}
+			else
+			{
+				isMem = 1;
+			}
+										
+	    //标志位=1的未成簇/孤立簇头不再响应以下包:
+		//来自未成簇/孤立簇头节点的join
+										
+		if((!isHeader&&!isMem)&&wbca->Ms&&(wbca->state!=LEADER&&wbca->state!=MEMBER))
+	      {
+											break;
+										  
+	       }
+
+
+										
 			if(wbca->state != 4 && wbca->state != 5)
 			{
 				MESSAGE_Free(node, msg);  
@@ -1488,7 +1543,10 @@ WbcaHandleProtocolPacket(
 				if(DEBUG_MODE&0x02){
 					printf(" node: %d send WBCA_OFFER to ip %x \n",node->nodeId,srcAddr.interfaceAddr.ipv4);
 				}
-
+              
+			//	标志位=1的孤立簇头不再主动发以下包:
+				//			收到未成簇/孤立簇头节点的join后向其发送的offer包
+				if(wbca->Ms&&wbca->state==LONELY_LEADER&&(!isMem&&!isHeader)) break;
 				WbcaSendMes(node, wbca, WBCA_OFFER, 0, srcAddr.interfaceAddr.ipv4, memID);
 			}
 			
@@ -1521,7 +1579,11 @@ WbcaHandleProtocolPacket(
 			else
 			{  
 				if(wbca->state!=LEADER&&wbca->state!=MEMBER){ //包含了未成簇和孤立簇头两种情况
-					//如果三次握手标志位为0  或者  自从收到offer已经超过6T没有成为成员
+                    //标志位1的孤立簇头和未分簇节点不再响应其它簇头的消息
+					if(wbca->Ms==1&&wbca->temporaryip!=srcAddr.interfaceAddr.ipv4) break;
+
+				//如果三次握手标志位为0  或者  自从收到offer已经超过6T没有成为成员
+					
 					if(wbca->Ms==0||getSimTime(node)-wbca->temporarytime>6*WBCA_THREE_INTERVAL)
 						{   wbca->temporarytime=getSimTime(node);
 			                wbca->Ms=1;
@@ -1595,6 +1657,32 @@ WbcaHandleProtocolPacket(
 				if(DEBUG_MODE&0x02){
 					printf(" node: %d send WBCA_ACK to ip %x \n",node->nodeId,srcAddr.interfaceAddr.ipv4);
 				}
+                
+				//标志位=1的孤立簇头不再主动发以下包:
+			    //收到未成簇/孤立簇头节点的request后向其发送的ack包
+			    Int16 CID = srcAddr.interfaceAddr.ipv4%65536;
+            bool isUn=0;
+			bool isHeader=0;
+			bool isMem=0;
+            Int8 getMemId = CID % 256;
+			Int8 getHeaderId = CID / 256;
+
+			//printf("\n0x%x 0x%x\n",getHeaderId,getMemId);
+
+			//where does the Hello packet come from
+			if(getMemId == 0 && getHeaderId == 0)
+			{
+				isUn = 1;
+			}
+			else if(getMemId == 0 && getHeaderId != 0)
+			{
+				isHeader = 1;
+			}
+			else
+			{
+				isMem = 1;
+			}
+				if(wbca->Ms&&wbca->state==LONELY_LEADER&&(!isMem&&!isHeader)) break;
 				WbcaSendMes(node, wbca, WBCA_ACK, 0, srcAddr.interfaceAddr.ipv4, pkt->info);
 			}
 
