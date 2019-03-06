@@ -1480,38 +1480,6 @@ WbcaHandleProtocolPacket(
 			WbcaData* wbca = (WbcaData *) NetworkIpGetRoutingProtocol(node,
                                         ROUTING_PROTOCOL_WBCA,
                                         NETWORK_IPV4);
-            Int16 CID = srcAddr.interfaceAddr.ipv4%65536;
-            bool isUn=0;
-			bool isHeader=0;
-			bool isMem=0;
-            Int8 getMemId = CID % 256;
-			Int8 getHeaderId = CID / 256;
-
-			//printf("\n0x%x 0x%x\n",getHeaderId,getMemId);
-
-			//where does the Hello packet come from
-			if(getMemId == 0 && getHeaderId == 0)
-			{
-				isUn = 1;
-			}
-			else if(getMemId == 0 && getHeaderId != 0)
-			{
-				isHeader = 1;
-			}
-			else
-			{
-				isMem = 1;
-			}
-										
-	    //标志位=1的未成簇/孤立簇头不再响应以下包:
-		//来自未成簇/孤立簇头节点的join
-										
-		if((!isHeader&&!isMem)&&wbca->Ms&&(wbca->state!=LEADER&&wbca->state!=MEMBER))
-	      {
-											break;
-										  
-	       }
-
 
 										
 			if(wbca->state != 4 && wbca->state != 5)
@@ -1524,8 +1492,17 @@ WbcaHandleProtocolPacket(
 				MESSAGE_Free(node, msg);  
 				break;
 			}
-			else
-			{
+			else if(wbca->Ms&&(wbca->state!=LEADER&&wbca->state!=MEMBER)){
+				//标志位=1的未成簇/孤立簇头不再响应以下包:
+				//来自未成簇/孤立簇头节点的join
+				printf("node %d refused to send offer due to Ms \n",node->nodeId);
+	      		MESSAGE_Free(node, msg);  
+				break;								  		    
+			}else{
+
+				if(DEBUG_MODE&0x02){
+					printf(" node: %d send WBCA_OFFER to ip %x \n",node->nodeId,srcAddr.interfaceAddr.ipv4);
+				}	
 				while( !WbcaCheckMemID(wbca, wbca->memIdSeed) )
 				{
 					if(wbca->memIdSeed == 255)
@@ -1540,13 +1517,6 @@ WbcaHandleProtocolPacket(
 
 				UInt16 memID = wbca->CID + wbca->memIdSeed;
 				wbca->memIdSeed++;
-				if(DEBUG_MODE&0x02){
-					printf(" node: %d send WBCA_OFFER to ip %x \n",node->nodeId,srcAddr.interfaceAddr.ipv4);
-				}
-              
-			//	标志位=1的孤立簇头不再主动发以下包:
-				//			收到未成簇/孤立簇头节点的join后向其发送的offer包
-				if(wbca->Ms&&wbca->state==LONELY_LEADER&&(!isMem&&!isHeader)) break;
 				WbcaSendMes(node, wbca, WBCA_OFFER, 0, srcAddr.interfaceAddr.ipv4, memID);
 			}
 			
@@ -1657,32 +1627,33 @@ WbcaHandleProtocolPacket(
 				if(DEBUG_MODE&0x02){
 					printf(" node: %d send WBCA_ACK to ip %x \n",node->nodeId,srcAddr.interfaceAddr.ipv4);
 				}
-                
+                /*
 				//标志位=1的孤立簇头不再主动发以下包:
 			    //收到未成簇/孤立簇头节点的request后向其发送的ack包
 			    Int16 CID = srcAddr.interfaceAddr.ipv4%65536;
-            bool isUn=0;
-			bool isHeader=0;
-			bool isMem=0;
-            Int8 getMemId = CID % 256;
-			Int8 getHeaderId = CID / 256;
+				bool isUn=0;
+				bool isHeader=0;
+				bool isMem=0;
+				Int8 getMemId = CID % 256;
+				Int8 getHeaderId = CID / 256;
 
-			//printf("\n0x%x 0x%x\n",getHeaderId,getMemId);
+				//printf("\n0x%x 0x%x\n",getHeaderId,getMemId);
 
-			//where does the Hello packet come from
-			if(getMemId == 0 && getHeaderId == 0)
-			{
-				isUn = 1;
-			}
-			else if(getMemId == 0 && getHeaderId != 0)
-			{
-				isHeader = 1;
-			}
-			else
-			{
-				isMem = 1;
-			}
-				if(wbca->Ms&&wbca->state==LONELY_LEADER&&(!isMem&&!isHeader)) break;
+				//where does the Hello packet come from
+				if(getMemId == 0 && getHeaderId == 0)
+				{
+					isUn = 1;
+				}
+				else if(getMemId == 0 && getHeaderId != 0)
+				{
+					isHeader = 1;
+				}
+				else
+				{
+					isMem = 1;
+				}
+				
+				if(wbca->Ms&&wbca->state==LONELY_LEADER&&(!isMem&&!isHeader)) break;*/
 				WbcaSendMes(node, wbca, WBCA_ACK, 0, srcAddr.interfaceAddr.ipv4, pkt->info);
 			}
 
@@ -1727,6 +1698,7 @@ WbcaHandleProtocolPacket(
 				node->is_leader = 0;
 				clocktype currtime=getSimTime(node);
 				insertTraceState(node,wbca->state);
+				printf("node %d end handshake \n",node->nodeId);
 				wbca->Ms=0; //三次握手结束
 				
 					
@@ -1753,7 +1725,7 @@ WbcaHandleProtocolPacket(
 		}
 		case WBCA_RTUP:{
 			char* pktPtr = MESSAGE_ReturnPacket(msg);
-			// break;
+			break;
 			WbcaData* wbca = (WbcaData *)NetworkIpGetRoutingProtocol(node, ROUTING_PROTOCOL_WBCA, NETWORK_IPV4);
 			WbcaRTUPHeader *header = (WbcaRTUPHeader *)pktPtr;
 			WbcaRTUP *RTUP = (WbcaRTUP *)(pktPtr+sizeof(WbcaRTUPHeader));
