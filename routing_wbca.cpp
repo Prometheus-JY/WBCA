@@ -1316,8 +1316,6 @@ WbcaHandleProtocolPacket(
 	TRACE_PrintTrace(node, msg, TRACE_NETWORK_LAYER,
 	PACKET_IN, &acnData , srcAddr.networkType);
 
-	//MESSAGE_Free(node, msg);
-	//return;
 
     switch (*packetType)
     {
@@ -1380,16 +1378,31 @@ WbcaHandleProtocolPacket(
 			{
 				isMem = 1;
 			}
-
-
+           
            //标志位为1的孤立簇头或者未分簇节点不再响应来自簇头的hello
            if(isHeader&&wbca->Ms&&(wbca->state!=LEADER&&wbca->state!=MEMBER))
-           	{
+           	{  MESSAGE_Free(node, msg);
                break;
              
 		   }
-
-
+           
+          //标志位为0的孤立簇头收到其他孤立簇头的hello 消息变成比较状态
+          if(wbca->Ms==0&&wbca->state==LONELY_LEADER&&pkt->state==LONELY_LEADER)
+          	{
+            wbca->state=COMPARING;
+			wbca->CID=0;
+			node->is_leader = 0;
+			wbca->cnt=0;
+			insertTraceState(node,wbca->state);
+           GUI_SetNodeIcon(node->nodeId,"gui/icons/DEFAULT.png",getSimStartTime(node));
+              MESSAGE_Free(node, msg);
+               break;
+		    }
+		  
+          //超时后三次握手标志位为0
+            if((getSimTime(node)-wbca->temporarytime>4*WBCA_THREE_INTERVAL)&&wbca->Ms) 
+				{wbca->Ms=0;
+				}
 			
 			//--------------------来自未成簇节点的hello消息------------------------
 			//自己是比较状态并且对面不是准簇成员状态时 比较wei,自己比较大的话,转换状态为准簇成员状态
@@ -1480,8 +1493,12 @@ WbcaHandleProtocolPacket(
 			WbcaData* wbca = (WbcaData *) NetworkIpGetRoutingProtocol(node,
                                         ROUTING_PROTOCOL_WBCA,
                                         NETWORK_IPV4);
-
-										
+              //超时后三次握手标志位为0
+            if((getSimTime(node)-wbca->temporarytime>4*WBCA_THREE_INTERVAL)&&wbca->Ms) 
+				{wbca->Ms=0;
+			   
+				}
+								
 			if(wbca->state != 4 && wbca->state != 5)
 			{
 				MESSAGE_Free(node, msg);  
@@ -1492,14 +1509,15 @@ WbcaHandleProtocolPacket(
 				MESSAGE_Free(node, msg);  
 				break;
 			}
-			else if(wbca->Ms&&(wbca->state!=LEADER&&wbca->state!=MEMBER)){
+			/*else if(wbca->Ms&&(wbca->state!=LEADER&&wbca->state!=MEMBER)){
 				//标志位=1的未成簇/孤立簇头不再响应以下包:
 				//来自未成簇/孤立簇头节点的join
 				printf("node %d refused to send offer due to Ms \n",node->nodeId);
 	      		MESSAGE_Free(node, msg);  
 				break;								  		    
-			}else{
-
+			} */
+			else{
+               
 				if(DEBUG_MODE&0x02){
 					printf(" node: %d send WBCA_OFFER to ip %x \n",node->nodeId,srcAddr.interfaceAddr.ipv4);
 				}	
@@ -1534,7 +1552,7 @@ WbcaHandleProtocolPacket(
 			WbcaData* wbca = (WbcaData *) NetworkIpGetRoutingProtocol(node,
                                         ROUTING_PROTOCOL_WBCA,
                                         NETWORK_IPV4);
-
+            
 			if(wbca->state == LEADER || wbca->state == MEMBER) //已经是簇成员或者是簇头
 			{
 				MESSAGE_Free(node, msg);  
@@ -1550,11 +1568,18 @@ WbcaHandleProtocolPacket(
 			{  
 				if(wbca->state!=LEADER&&wbca->state!=MEMBER){ //包含了未成簇和孤立簇头两种情况
                     //标志位1的孤立簇头和未分簇节点不再响应其它簇头的消息
-					if(wbca->Ms==1&&wbca->temporaryip!=srcAddr.interfaceAddr.ipv4) break;
+					if(wbca->Ms==1&&wbca->temporaryip!=srcAddr.interfaceAddr.ipv4)
+					{
+					MESSAGE_Free(node, msg);
+					break;
+					}
 
-				//如果三次握手标志位为0  或者  自从收到offer已经超过6T没有成为成员
-					
-					if(wbca->Ms==0||getSimTime(node)-wbca->temporarytime>6*WBCA_THREE_INTERVAL)
+				//如果三次握手标志位为0  或者  自从收到offer已经超过4T没有成为成员超时后标志位改变
+					if((getSimTime(node)-wbca->temporarytime>4*WBCA_THREE_INTERVAL)&&wbca->Ms) 
+				{wbca->Ms=0;
+				
+				}
+					if(wbca->Ms==0)
 						{   wbca->temporarytime=getSimTime(node);
 			                wbca->Ms=1;
 						    wbca->temporaryip=srcAddr.interfaceAddr.ipv4;
@@ -1586,7 +1611,8 @@ WbcaHandleProtocolPacket(
                                         NETWORK_IPV4);
 			
 			if(wbca->state != LEADER && wbca->state != LONELY_LEADER) //不是簇头
-			{
+			{     //超时后三次握手标志位为0
+         
 				MESSAGE_Free(node, msg);  
 				break;
 			}
@@ -1598,7 +1624,11 @@ WbcaHandleProtocolPacket(
 			else
 			{ //自己是簇头并且这个request是给自己的
 				WbcaInsertMemMNList(wbca, node, srcAddr.interfaceAddr.ipv4, pkt->info,wbca->wei);
-
+                   //超时后三次握手标志位为0
+            if((getSimTime(node)-wbca->temporarytime>4*WBCA_THREE_INTERVAL)&&wbca->Ms) 
+				{wbca->Ms=0;
+			   
+				}
 				//
 				if(DEBUG_MODE&0x04){
 					if(wbca->state==LONELY_LEADER){
@@ -1627,33 +1657,7 @@ WbcaHandleProtocolPacket(
 				if(DEBUG_MODE&0x02){
 					printf(" node: %d send WBCA_ACK to ip %x \n",node->nodeId,srcAddr.interfaceAddr.ipv4);
 				}
-                /*
-				//标志位=1的孤立簇头不再主动发以下包:
-			    //收到未成簇/孤立簇头节点的request后向其发送的ack包
-			    Int16 CID = srcAddr.interfaceAddr.ipv4%65536;
-				bool isUn=0;
-				bool isHeader=0;
-				bool isMem=0;
-				Int8 getMemId = CID % 256;
-				Int8 getHeaderId = CID / 256;
-
-				//printf("\n0x%x 0x%x\n",getHeaderId,getMemId);
-
-				//where does the Hello packet come from
-				if(getMemId == 0 && getHeaderId == 0)
-				{
-					isUn = 1;
-				}
-				else if(getMemId == 0 && getHeaderId != 0)
-				{
-					isHeader = 1;
-				}
-				else
-				{
-					isMem = 1;
-				}
-				
-				if(wbca->Ms&&wbca->state==LONELY_LEADER&&(!isMem&&!isHeader)) break;*/
+             
 				WbcaSendMes(node, wbca, WBCA_ACK, 0, srcAddr.interfaceAddr.ipv4, pkt->info);
 			}
 
@@ -1683,8 +1687,11 @@ WbcaHandleProtocolPacket(
 				break;
 			}
 			else if(wbca->state != LEADER && wbca->state != MEMBER) //既不是簇头也不是成员
-			{
-	
+			{   //超时后标志位改变
+	            if((getSimTime(node)-wbca->temporarytime>4*WBCA_THREE_INTERVAL)&&wbca->Ms) 
+				{wbca->Ms=0;
+				
+			}
 				if(wbca->temporaryip!=srcAddr.interfaceAddr.ipv4){
 					printf("node %d temporaryip %x but receive ACK from %x\n",node->nodeId,wbca->temporaryip,srcAddr.interfaceAddr.ipv4);
 					MESSAGE_Free(node, msg);
@@ -1697,6 +1704,7 @@ WbcaHandleProtocolPacket(
 				wbca->state = MEMBER;
 				node->is_leader = 0;
 				clocktype currtime=getSimTime(node);
+				wbca->temporarytime=currtime;
 				insertTraceState(node,wbca->state);
 				printf("node %d end handshake \n",node->nodeId);
 				wbca->Ms=0; //三次握手结束
@@ -1823,7 +1831,7 @@ WbcaHandleProtocolEvent(
 				wbca->cnt++;
 			}else if(wbca->state == COMPARING && wbca->cnt ==3){  //比较状态 3T到时
 				//比较状态经过三个T没有变成准簇成员状态,说明它的wei最小,所以变为簇头
-				wbca->state = LONELY_LEADER;
+				wbca->state = LONELY_LEADER;//权值最小是簇头吧
 				node->is_leader =1;
 				insertTraceState(node,wbca->state);
 				wbca->CID = GetHeaderCID(wbca);
@@ -1833,9 +1841,8 @@ WbcaHandleProtocolEvent(
 				if(DEBUG_MODE&0x04){
 					printf("node %d cid(%x) COMPARING->LONELY_LEADER wei min \n",node->nodeId,wbca->CID);
 				}
-				GUI_SetNodeIcon(node->nodeId,
-							"gui/icons/tank.png",
-							currtime);
+			
+				GUI_SetNodeIcon(node->nodeId,"gui/icons/tank.png",currtime);
 			}
 
 			//---------------------------准簇成员状态----------------------------
