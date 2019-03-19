@@ -27,6 +27,9 @@
 #define LONELY_LEADER 5
 #define MEMBER        6
 
+#define WBCA_RTUP_MAX_NEIGHBOR 20
+#define WBCA_RTUP_INTERVAL 5
+
 
 typedef struct str_wbca_interface_info
 {
@@ -55,7 +58,7 @@ typedef struct struct_wbca_MNList
 	clocktype TTL; //用于记录接收到消息的当前系统时间，每收到Hello消息，则会更新此项。
 	double x,y,z;
 	double m;
-    BOOL okHeader;
+    bool isHeader;
 	//MobilityData* mobilityData;
 	//int nodeId;
 }WbcaMNList;
@@ -69,6 +72,7 @@ typedef struct struct_wbca_RouteTable
  Int16 nextCID;
  Int32 distance;
  UInt32 seqNum;
+ NodeAddress neighbors[WBCA_RTUP_MAX_NEIGHBOR];  
 } WbcaRouteTable;
 
 typedef struct struct_network_wbca_str
@@ -95,8 +99,7 @@ typedef struct struct_network_wbca_str
 	double M;
 	double m;
     double x,y,z;
-	//作为成员 3次收到来自簇头的hello 连续3次簇头的邻居表中没有自己时,自己变为Pre_member 
-    unsigned short lost_leader_count; 
+
     MobilityData* mobilityData;
 	int change;
 
@@ -114,8 +117,10 @@ typedef struct struct_network_wbca_str
     BOOL statsCollected;
     BOOL statsPrinted;
 
-
-
+    //作为成员 3次收到来自簇头的hello 连续3次簇头的邻居表中没有自己时,自己变为Pre_member 
+    unsigned short lost_leader_count; 
+    //每个簇头定期广播RTUP消息的计数器
+    unsigned short broadcast_rtup_count; 
 
 }WbcaData;
 
@@ -165,7 +170,8 @@ typedef struct Wbca_RTUP
     NodeAddress destIP;
     Int16 destCID;
     Int16 distance;
-    UInt32 seqNum;  
+    UInt32 seqNum;
+    NodeAddress neighbors[WBCA_RTUP_MAX_NEIGHBOR];  
 }WbcaRTUP;
 
 
